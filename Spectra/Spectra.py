@@ -551,13 +551,14 @@ class SPECTRA_Model:
         self.rho = None
         self.kappa = None
 
-    def train(self,X, labels = None, lr_schedule = [1.0,.5,.1,.01,.001,.0001],num_epochs = 10000, verbose = False):
-        opt = torch.optim.Adam(self.internal_model.parameters(), lr=lr_schedule[0])
+    def train(self, X, labels=None, lr_schedule=[1.0, .5, .1, .01, .001, .0001], num_epochs=10000, verbose=False):
+        history = []
+        current_lr = lr_schedule[0]
+        opt = torch.optim.Adam(self.internal_model.parameters(), lr=current_lr)
         counter = 0
         last = np.inf
 
         for i in tqdm(range(num_epochs)):
-            #print(counter)
             opt.zero_grad()
             if self.internal_model.use_cell_types:
                 assert(len(labels) == X.shape[0])
@@ -567,24 +568,26 @@ class SPECTRA_Model:
 
             loss.backward()
             opt.step()
+            history.append((i, current_lr, loss.item()))
 
             if loss.item() >= last:
                 counter += 1
                 if int(counter/3) >= len(lr_schedule):
                     break
                 if counter % 3 == 0:
-                    opt = torch.optim.Adam(self.internal_model.parameters(), lr=lr_schedule[int(counter/3)])
+                    current_lr = lr_schedule[int(counter/3)]
+                    opt = torch.optim.Adam(self.internal_model.parameters(), lr=current_lr)
                     if verbose:
-                        print("UPDATING LR TO " + str(lr_schedule[int(counter/3)]))
+                        print(f"UPDATING LR TO {current_lr}")
             last = loss.item()
 
-
         #add all model parameters as attributes
-
         if self.use_cell_types:
             self.__store_parameters(labels)
         else:
             self.__store_parameters_no_celltypes()
+        self.history = history
+
     def save(self, fp):
         torch.save(self.internal_model.state_dict(),fp)
 
