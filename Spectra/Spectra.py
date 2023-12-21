@@ -304,6 +304,72 @@ class SPECTRA(nn.Module):
             loss = loss + term2 + term3
         return loss
 
+    def reconstruction_loss(self, X, labels):
+        """
+        shameless copy of loss function, but only returns the reconstruction loss
+        """
+        assert(self.use_cell_types) #if this is False, fail because model has not been initialized to use cell types
+
+        #convert inputs to torch.Tensors
+        X = torch.Tensor(X)
+        #labels = torch.Tensor(labels)
+
+        #initialize loss and fetch global parameters
+        loss = 0.0
+        theta_global = torch.softmax(self.theta["global"], dim = 1)
+        eta_global = (self.eta["global"]).exp()/(1.0 + (self.eta["global"]).exp())
+        eta_global = 0.5*(eta_global + eta_global.T)
+        gene_scaling_global = self.gene_scaling["global"].exp()/(1.0 + self.gene_scaling["global"].exp())
+
+        #loop through cell types and evaluate loss at every cell type
+        for cell_type in self.cell_types:
+            gene_scaling_ct = self.gene_scaling[cell_type].exp()/(1.0 + self.gene_scaling[cell_type].exp())
+            X_c = X[labels == cell_type]
+            theta_ct = torch.softmax(self.theta[cell_type], dim = 1)
+            eta_ct = (self.eta[cell_type]).exp()/(1.0 + (self.eta[cell_type]).exp())
+            eta_ct = 0.5*(eta_ct + eta_ct.T)
+            theta_global_ = contract('jk,j->jk',theta_global, gene_scaling_global + self.delta)
+            theta_ct_ = contract('jk,j->jk',theta_ct, gene_scaling_ct + self.delta)
+            theta = torch.cat((theta_global_, theta_ct_),1)
+            alpha = torch.exp(self.alpha[cell_type])
+            recon = contract('ik,jk->ij', alpha, theta)
+            term1 = -1.0*(torch.xlogy(X_c,recon) - recon).sum()
+            loss = loss + term1
+        return loss
+
+    def reconstruction(self, X, labels):
+        """
+        return reconstructed version of expression matrix
+        """
+        assert(self.use_cell_types) #if this is False, fail because model has not been initialized to use cell types
+
+        #convert inputs to torch.Tensors
+        X = torch.Tensor(X)
+        X_out = torch.zeros(X.shape)
+        #labels = torch.Tensor(labels)
+
+        #initialize loss and fetch global parameters
+        theta_global = torch.softmax(self.theta["global"], dim = 1)
+        eta_global = (self.eta["global"]).exp()/(1.0 + (self.eta["global"]).exp())
+        eta_global = 0.5*(eta_global + eta_global.T)
+        gene_scaling_global = self.gene_scaling["global"].exp()/(1.0 + self.gene_scaling["global"].exp())
+
+        #loop through cell types and evaluate loss at every cell type
+        for cell_type in self.cell_types:
+            gene_scaling_ct = self.gene_scaling[cell_type].exp()/(1.0 + self.gene_scaling[cell_type].exp())
+            cell_type_idx = labels == cell_type
+            X_c = X[cell_type_idx]
+            theta_ct = torch.softmax(self.theta[cell_type], dim = 1)
+            eta_ct = (self.eta[cell_type]).exp()/(1.0 + (self.eta[cell_type]).exp())
+            eta_ct = 0.5*(eta_ct + eta_ct.T)
+            theta_global_ = contract('jk,j->jk',theta_global, gene_scaling_global + self.delta)
+            theta_ct_ = contract('jk,j->jk',theta_ct, gene_scaling_ct + self.delta)
+            theta = torch.cat((theta_global_, theta_ct_),1)
+            alpha = torch.exp(self.alpha[cell_type])
+            recon = contract('ik,jk->ij', alpha, theta)
+            X_out[cell_type_idx] = recon
+        return X_out
+
     def loss_no_cell_types(self, X):
         assert(self.use_cell_types == False) #if this is True, just fail
         X = torch.Tensor(X)
