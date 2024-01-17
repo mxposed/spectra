@@ -514,44 +514,55 @@ class SPECTRA_Model:
         self.rho = None
         self.kappa = None
 
-    def train(self,X, labels = None, lr_schedule = [.5,.1,.01,.001,.0001], num_epochs = 100, batch_size = 1000, skip = 15, verbose = False):
-        opt = torch.optim.Adam(self.internal_model.parameters(), lr=lr_schedule[0])
+    def train(
+            self,
+            X,
+            labels = None,
+            lr_schedule = [.5,.1,.01,.001,.0001],
+            num_epochs = 100,
+            batch_size = 1000,
+            skip = 15,
+            verbose = False
+    ):
+        history = []
+        current_lr = lr_schedule[0]
+        opt = torch.optim.Adam(self.internal_model.parameters(), lr=current_lr)
         counter = 0
         last = np.inf
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        if (self.internal_model.use_cell_types == False):
+        if self.internal_model.use_cell_types == False:
             raise NotImplementedError("use_cell_types == False is not yet supported")
+
         for i in tqdm(range(num_epochs)):
-            #At the beginning of epoch, get local parameters and batch them in random order
-            to_batch = [torch.Tensor(X), self.internal_model.alpha_mask, self.internal_model.alpha]
-            batches = batchify(to_batch, batch_size)
-            X_b, alpha_mask_b, alpha_b = batches[0], batches[1], batches[2]
+            opt.zero_grad()
+            loss = self.internal_model.loss(
+                X.to(device),
+                self.internal_model.alpha_mask.to(device),
+                self.internal_model.alpha.to(device),
+                self.internal_model.n
+            )
+            loss.backward()
+            opt.step()
+            history.append((i, current_lr, loss.item()))
 
-            tot = 0
-            for j in range(len(X_b)):
-                opt.zero_grad()
-                loss = self.internal_model.loss(X_b[j].to(device), alpha_mask_b[j].to(device), alpha_b[j], batch_size)
-                loss.backward()
-                opt.step()
-                tot += loss.item()
-
-                if loss.item() >= last:
-                    counter += 1
-                    if int(counter/skip) >= len(lr_schedule):
-                        break
-                    if counter % skip == 0:
-                        opt = torch.optim.Adam(self.internal_model.parameters(), lr=lr_schedule[int(counter/skip)])
-                        if verbose:
-                            print("UPDATING LR TO " + str(lr_schedule[int(counter/skip)]))
-                last = loss.item()
-
+            if loss.item() >= last:
+                counter += 1
+                if int(counter/skip) >= len(lr_schedule):
+                    break
+                if counter % skip == 0:
+                    current_lr = lr_schedule[int(counter/skip)]
+                    opt = torch.optim.Adam(self.internal_model.parameters(), lr=current_lr)
+                    if verbose:
+                        print(f"UPDATING LR TO {current_lr}")
+            last = loss.item()
 
         #add all model parameters as attributes
-
         if self.use_cell_types:
             self.__store_parameters(labels)
         else:
             self.__store_parameters_no_celltypes()
+        self.history = history
+
     def save(self, fp):
         torch.save(self.internal_model.state_dict(),fp)
 
